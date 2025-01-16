@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::{
     io,
     net::{IpAddr, SocketAddr},
@@ -12,8 +13,20 @@ use tracing_subscriber::EnvFilter;
 
 pub mod tcp;
 
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(long, default_value = "7893")]
+    tproxy_port: u16,
+
+    #[clap(long, default_value = "8964")]
+    tproxy_remote_mark: i32,
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let args = Args::parse();
+
     let filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("debug"))
         .unwrap();
@@ -21,9 +34,9 @@ async fn main() -> io::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // avoid infinite loop in iptables
-    set_mark(0xff);
+    set_mark(args.tproxy_remote_mark);
 
-    let addr = SocketAddr::new(IpAddr::from_str("0.0.0.0").unwrap(), 7893);
+    let addr = SocketAddr::new(IpAddr::from_str("0.0.0.0").unwrap(), args.tproxy_port);
     let listener = new_listener(addr)?;
 
     loop {
