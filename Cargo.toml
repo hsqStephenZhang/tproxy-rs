@@ -13,3 +13,5 @@ tracing-subscriber = "0.2.0"
 regex = { version = "1", features = ["unicode-case"] }
 socket2 = "0.5.8"
 clap = { version = "4.5", features = ["derive"] }
+unix-udp-sock = { git = "https://github.com/Watfaq/unix-udp-sock.git", rev = "847c80b519" }
+socket2-ext = { version = "0.1" }
