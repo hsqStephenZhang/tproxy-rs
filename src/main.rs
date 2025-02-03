@@ -1,11 +1,12 @@
 use clap::Parser;
 use std::{
+    collections::HashSet,
     io,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::Arc,
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::Mutex};
 use tracing::*;
 use unix_udp_sock::UdpSocket;
 
@@ -57,7 +58,45 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
+pub struct Detector {
+    set: HashSet<SocketAddr>,
+}
+
+impl Detector {
+    pub fn new() -> Self {
+        Self {
+            set: HashSet::new(),
+        }
+    }
+
+    pub fn insert(&mut self, addr: SocketAddr) -> bool {
+        self.set.insert(addr)
+    }
+
+    pub fn remove(&mut self, addr: &SocketAddr) -> bool {
+        self.set.remove(addr)
+    }
+
+    pub fn contains(&self, addr: &SocketAddr) -> bool {
+        self.set.contains(addr)
+    }
+}
+
+pub struct DetectGuard(SocketAddr, Arc<Mutex<Detector>>);
+
+impl DetectGuard {
+    pub async fn new(addr: SocketAddr, detector: Arc<Mutex<Detector>>) -> Self {
+        detector.lock().await.insert(addr);
+        Self(addr, detector)
+    }
+
+    pub async fn drop_manually(self) {
+        self.1.lock().await.remove(&self.0);
+    }
+}
+
 async fn handle_tcp_stream(listener: TcpListener) -> io::Result<()> {
+    let routing_loop_detector = Arc::new(Mutex::new(Detector::new()));
     loop {
         match listener.accept().await {
             Ok((mut stream, _)) => {
@@ -65,15 +104,17 @@ async fn handle_tcp_stream(listener: TcpListener) -> io::Result<()> {
                     tracing::error!("error trying to set TCP nodelay: {}", e);
                 }
                 let remote_addr = stream.local_addr().unwrap();
+                let local_addr = stream.peer_addr().unwrap();
+                if routing_loop_detector.lock().await.contains(&local_addr) {
+                    tracing::warn!("routing loop detected, drop connection from {:?}", local_addr);
+                    continue;
+                }
+
+                let detector = routing_loop_detector.clone();
 
                 tokio::spawn(async move {
-                    let local_addr = stream.peer_addr().unwrap();
-                    tracing::info!(
-                        "serve stream: local: {:?} =>remote: {:?}, ",
-                        &remote_addr,
-                        &local_addr
-                    );
                     let mut proxy_to_target = new_tcp_stream(remote_addr).await.unwrap();
+                    let guard  = DetectGuard::new(proxy_to_target.local_addr().unwrap(), detector).await;
 
                     tracing::info!(
                         "proxy to target: {:?} => {:?}",
@@ -89,6 +130,7 @@ async fn handle_tcp_stream(listener: TcpListener) -> io::Result<()> {
                         status.as_ref().map(|(a, _)| *a).unwrap_or_default(),
                         status.as_ref().map(|(_, b)| *b).unwrap_or_default(),
                     );
+                    guard.drop_manually().await;
                 });
             }
             Err(e) => {
