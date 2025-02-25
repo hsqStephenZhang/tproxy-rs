@@ -49,12 +49,16 @@ pub async fn new_tcp_stream(remote_addr: SocketAddr) -> io::Result<TcpStream> {
 
 pub fn new_udp_listener(addr: SocketAddr) -> io::Result<unix_udp_sock::UdpSocket> {
     let socket = match addr {
-        SocketAddr::V4(_) => {
-            socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, Some(Protocol::UDP))?
-        }
-        SocketAddr::V6(_) => {
-            socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::DGRAM, Some(Protocol::UDP))?
-        }
+        SocketAddr::V4(_) => socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::DGRAM,
+            Some(Protocol::UDP),
+        )?,
+        SocketAddr::V6(_) => socket2::Socket::new(
+            socket2::Domain::IPV6,
+            socket2::Type::DGRAM,
+            Some(Protocol::UDP),
+        )?,
     };
 
     socket.set_ip_transparent(true)?;
@@ -120,4 +124,17 @@ pub async fn new_udp_packet(
         socket.connect(addr).await?;
     }
     socket
+}
+
+#[cfg(test)]
+mod tests {
+    use super::new_tcp_listener;
+    use std::{net::{IpAddr, SocketAddr}, str::FromStr};
+
+    #[tokio::test]
+    async fn t1() {
+        let addr = SocketAddr::new(IpAddr::from_str("127.0.0.1").unwrap(), 10002);
+        let t = new_tcp_listener(addr);
+        let _ = t;
+    }
 }
